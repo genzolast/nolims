@@ -1,0 +1,91 @@
+# Konfigurasi LiteLLM proxy.
+# Semua kunci upstream dibaca dari environment (file .env), tidak ada rahasia di sini.
+
+model_list:
+  # ---------------- Tier utama: Google Gemini (endpoint OpenAI-compatible) -------
+  - model_name: pribadi-pro
+    litellm_params:
+      model: openai/gemini-2.5-flash
+      api_base: https://generativelanguage.googleapis.com/v1beta/openai/
+      api_key: os.environ/GEMINI_KEY
+      rpm: 10            # batas wajar tier gratis Gemini Flash
+      timeout: 240
+      max_retries: 2
+
+  - model_name: pribadi-jenius
+    litellm_params:
+      model: openai/gemini-2.5-pro
+      api_base: https://generativelanguage.googleapis.com/v1beta/openai/
+      api_key: os.environ/GEMINI_KEY
+      rpm: 4             # tier gratis Gemini Pro jauh lebih ketat
+      timeout: 240
+      max_retries: 2
+
+  # ---------------- Tier hemat: OpenRouter --------------------------------------
+  - model_name: pribadi-hemat
+    litellm_params:
+      model: openai/xiaomi/mimo-v2-flash:free
+      api_base: https://openrouter.ai/api/v1
+      api_key: os.environ/OPENROUTER_KEY
+      rpm: 15
+      timeout: 240
+      max_retries: 2
+
+  # ---------------- Tier hemat cadangan: AIHubMix -------------------------------
+  - model_name: pribadi-hemat-2
+    litellm_params:
+      model: openai/xiaomi-mimo-v2.5-free
+      api_base: https://aihubmix.com/v1
+      api_key: os.environ/AIHUBMIX_KEY
+      rpm: 5
+      timeout: 240
+      max_retries: 2
+
+litellm_settings:
+  request_timeout: 240       # request timeout ~240 detik
+  drop_params: true          # buang parameter yang tidak didukung upstream
+  set_verbose: false
+  # Cache respons exact-match lewat Redis (AKTIF)
+  cache: true
+  cache_params:
+    type: redis
+    host: redis
+    port: 6379
+    ttl: 86400
+    namespace: "pgw.cache"
+    supported_call_types: ["completion", "acompletion"]
+
+router_settings:
+  routing_strategy: simple-shuffle
+  # Rantai fallback:
+  #   pribadi-jenius -> pribadi-pro (Gemini Flash) -> pribadi-hemat -> pribadi-hemat-2
+  #   pribadi-pro    -> pribadi-hemat -> pribadi-hemat-2
+  fallbacks:
+    - pribadi-jenius: [pribadi-pro, pribadi-hemat, pribadi-hemat-2]
+    - pribadi-pro: [pribadi-hemat, pribadi-hemat-2]
+  num_retries: 2             # retry maksimal 2 per model
+  retry_after: 5
+  timeout: 240
+  allowed_fails: 0           # cooldown begitu ada kegagalan
+  cooldown_time: 60          # cooldown upstream error/429/timeout ~60 detik
+  redis_host: redis          # state cooldown bersama lintas worker
+  redis_port: 6379
+  retry_policy:
+    RateLimitErrorRetries: 2
+    TimeoutErrorRetries: 2
+    InternalServerErrorRetries: 2
+    ServiceUnavailableErrorRetries: 2
+    AuthenticationErrorRetries: 0
+    BadRequestErrorRetries: 0
+    ContentPolicyViolationErrorRetries: 0
+  allowed_fails_policy:
+    RateLimitErrorAllowedFails: 10000
+    TimeoutErrorAllowedFails: 10
+    InternalServerErrorAllowedFails: 10
+
+general_settings:
+  master_key: os.environ/MASTER_KEY   # satu master key untuk semua pemakaian
+  # Fitur multi-user / billing dimatikan:
+  disable_spend_logs: true
+  disable_reset_budget: true
+  disable_adding_master_key_hash_to_db: true
