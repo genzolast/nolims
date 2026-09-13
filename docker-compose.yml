@@ -1,0 +1,55 @@
+# Personal AI gateway — proxy LLM + cache Redis.
+# Semua rahasia dibaca dari file .env (jangan pernah commit file .env).
+name: personal-gateway
+
+services:
+  proxy:
+    # LiteLLM proxy (OpenAI-compatible). Tag :latest adalah pointer stabil resmi
+    # (tag lama main-stable sudah deprecated). Untuk mengunci versi, ganti
+    # dengan tag versi, mis. ghcr.io/berriai/litellm:v1.100.1
+    image: ghcr.io/berriai/litellm:latest
+    container_name: pgw-proxy
+    restart: always
+    command: ["--config", "/app/config.yaml", "--host", "0.0.0.0", "--port", "4000"]
+    env_file:
+      - .env
+    environment:
+      LITELLM_LOG: "ERROR"
+      # Tidak ada DATABASE_URL -> tanpa database, tanpa virtual key, tanpa billing.
+      REDIS_HOST: "redis"
+      REDIS_PORT: "6379"
+    ports:
+      # HANYA mendengarkan di loopback VPS. Akses dari luar wajib lewat SSH tunnel.
+      - "127.0.0.1:4000:4000"
+    volumes:
+      # File konfigurasi di-mount read-only.
+      - ./litellm-config.yaml:/app/config.yaml:ro
+    depends_on:
+      - redis
+    mem_limit: 1.2g
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness').read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+    networks:
+      - pgw
+
+  redis:
+    image: redis:7-alpine
+    container_name: pgw-redis
+    restart: always
+    command: ["redis-server", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    mem_limit: 192m
+    networks:
+      - pgw
+
+volumes:
+  redis-data:
+
+networks:
+  pgw:
+    name: pgw-net

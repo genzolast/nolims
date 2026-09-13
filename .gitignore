@@ -1,0 +1,15 @@
+# Rahasia
+.env
+
+# Data / cache
+data/
+cache/
+redis-data/
+
+# Log
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/

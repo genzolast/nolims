@@ -1,0 +1,27 @@
+# Overlay add-on bot Telegram.
+# Dipakai bersama file utama:
+#   docker compose -f docker-compose.yml -f docker-compose.tele.yml up -d
+# Atau cukup jalankan:  bash install-tele.sh
+name: personal-gateway
+
+services:
+  bot:
+    build: ./telegram-bot
+    container_name: pgw-bot
+    restart: always
+    env_file:
+      - .env
+    environment:
+      # Alamat internal di jaringan compose (tidak ada port yang dipublikasikan).
+      LITELLM_URL: http://proxy:4000
+      BOT_MODEL: pribadi-pro
+    depends_on:
+      - proxy
+    mem_limit: 200m
+    networks:
+      - pgw
+    # TIDAK ada bagian "ports": bot memakai long-polling keluar, tanpa port masuk.
+
+networks:
+  pgw:
+    name: pgw-net
