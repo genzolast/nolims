@@ -1,0 +1,25 @@
+# Overlay add-on bot pemeriksa tautan (link inspector).
+# Dipakai bersama file utama:
+#   docker compose -f docker-compose.yml -f docker-compose.link.yml up -d linkbot
+# Atau cukup jalankan:  bash install-link.sh
+name: personal-gateway
+
+services:
+  linkbot:
+    build: ./link-tools
+    container_name: pgw-linkbot
+    restart: always
+    env_file:
+      - .env
+    environment:
+      # Pakai TELEGRAM_BOT_TOKEN yang sama bila tokennya ingin dipakai bersama,
+      # atau isi LINKBOT_TOKEN untuk bot terpisah.
+      BOT_MODEL: pribadi-pro
+    mem_limit: 200m
+    networks:
+      - pgw
+    # TIDAK ada bagian "ports": bot memakai long-polling keluar, tanpa port masuk.
+
+networks:
+  pgw:
+    name: pgw-net

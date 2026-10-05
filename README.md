@@ -63,7 +63,8 @@ Rantai fallback (`router_settings.fallbacks` di `litellm-config.yaml`):
 | `GEMINI_KEY` | https://aistudio.google.com/apikey | Satu kunci dipakai Flash & Pro. Kuota Pro jauh lebih kecil. |
 | `OPENROUTER_KEY` | https://openrouter.ai/keys | Pilih model `:free`, periksa kuota harian di dashboard. |
 | `AIHubMix_KEY` | https://aihubmix.com (menu API key/token) | Cadangan terakhir, rpm dibatasi rendah. |
-| `TELEGRAM_BOT_TOKEN` | Telegram → @BotFather → `/newbot` | Opsional, hanya bila memakai add-on bot. |
+| `TELEGRAM_BOT_TOKEN` | Telegram → @BotFather → `/newbot` | Opsional, hanya bila memakai add-on bot AI. |
+| `LINKBOT_TOKEN` | Telegram → @BotFather → `/newbot` (bot kedua) | Opsional, untuk add-on bot pemeriksa tautan. |
 | `ALLOWED_CHATS` | @userinfobot / @getidsbot | Chat id Anda; beberapa id pisahkan dengan koma. |
 | `MASTER_KEY` | Dibuat otomatis oleh `install.sh` | Random hex 32 byte; satu kunci untuk semua pemakaian. |
 
@@ -118,7 +119,65 @@ Karakteristik bot:
 - Balasan >4096 karakter dipecah di batas baris; indikator `typing` dikirim selama menunggu;
   pengiriman pesan di-retry 3 kali.
 
-## 6. Cara pakai
+## 6. Add-on bot pemeriksa tautan (link inspector)
+
+Bot Telegram kedua (terpisah dari bot AI) yang mengubah tautan apa pun menjadi **kartu
+pratinjau**: judul, penulis, deskripsi, gambar, embed resmi penyedia, URL akhir setelah
+pengalihan, dan status HTTP-nya — cara kerjanya sama seperti pratinjau tautan di aplikasi pesan.
+
+```bash
+# isi LINKBOT_TOKEN (dari @BotFather) dan ALLOWED_CHATS di .env
+
+bash install-link.sh
+```
+
+Perintah bot:
+
+| Perintah | Fungsi |
+|---|---|
+| kirim tautan saja | kartu pratinjau (maks 3 tautan per pesan) |
+| `/expand <tautan>` | lacak pengalihan shortlink (bit.ly, t.co, …) tanpa pratinjau |
+| `/json <tautan>` | laporan mentah dalam JSON |
+| `/help` | bantuan |
+
+Sumber metadata, berurutan:
+
+1. **Pengalihan** dilacak sendiri (maks 8 hop) dan rantainya ditampilkan, lalu URL akhir diperiksa ulang penyedianya.
+2. **oEmbed resmi** untuk penyedia yang menyediakannya: YouTube, Vimeo, Dailymotion, SoundCloud, Spotify,
+   TikTok, X/Twitter, Reddit, Flickr, Tumblr, Kickstarter — plus `noembed.com` untuk Instagram, Facebook,
+   Twitch, dan Imgur.
+3. Sisanya memakai tag **Open Graph / Twitter Card** (`og:title`, `og:description`, `og:image`, `og:video`).
+4. Kode `<iframe>` yang ditampilkan selalu berasal dari respons oEmbed resmi penyedia.
+
+Batas yang disengaja (lihat docstring `link-tools/linkinspect.py`):
+
+- **Tidak** mengekstrak stream video/audio dari situs penonton streaming.
+- **Tidak** memproses playlist HLS (`.m3u8`), DASH (`.mpd`), atau segmen `.ts`.
+- **Tidak** memalsukan `Referer`/`User-Agent` untuk menembus proteksi hotlink.
+- Berkas media (`mp4`, `m3u8`, `zip`, …) hanya dibaca **header**-nya; isinya tidak diunduh.
+- Menghormati `robots.txt`: halaman yang dilarang tidak diambil (`LINKBOT_RESPECT_ROBOTS=0` untuk melewati).
+- VPS terlindung dari SSRF: `localhost`, IP privat, `169.254.169.254`, dan skema non-`http(s)` ditolak.
+
+Uji mandiri offline (tanpa internet, memakai server HTTP tiruan):
+
+```bash
+cd link-tools && python3 selftest.py
+```
+
+Konfigurasi opsional di `.env`:
+
+| Variabel | Default | Fungsi |
+|---|---|---|
+| `LINKBOT_TOKEN` | nilai `TELEGRAM_BOT_TOKEN` | token bot; **pakai bot terpisah** — satu token hanya boleh punya satu `getUpdates` aktif |
+| `LINKBOT_MAX_LINKS` | `3` | maksimum tautan yang diperiksa per pesan |
+| `LINKBOT_TIMEOUT` | `12` | timeout HTTP per tautan (detik) |
+| `LINKBOT_MAX_BYTES` | `524288` | batas baca HTML untuk metadata |
+| `LINKBOT_MAX_REDIRECTS` | `8` | maksimum hop pengalihan |
+| `LINKBOT_RESPECT_ROBOTS` | `1` | `0` untuk mengabaikan `robots.txt` |
+| `LINKBOT_SEND_PHOTO` | `1` | `0` bila kartu bergambar tidak diinginkan |
+| `LINKBOT_NOEMBED` | `1` | `0` untuk melarang pemakaian `noembed.com` |
+
+## 7. Cara pakai
 
 **a. SSH tunnel (wajib, karena proxy hanya di loopback VPS)**
 
@@ -163,7 +222,7 @@ model    : pribadi-pro | pribadi-jenius | pribadi-hemat | pribadi-hemat-2
 curl http://127.0.0.1:4000/health/liveliness
 ```
 
-## 7. Troubleshooting
+## 8. Troubleshooting
 
 | Gejala | Periksa |
 |---|---|
@@ -174,11 +233,14 @@ curl http://127.0.0.1:4000/health/liveliness
 | Model tidak ditemukan | Pastikan alias persis: `pribadi-pro`, `pribadi-jenius`, `pribadi-hemat`, `pribadi-hemat-2`. |
 | Bot diam saja | Chat id Anda belum ada di `ALLOWED_CHATS`, atau token salah: `docker compose logs -f bot`. |
 | Bot hidup tetapi jawaban error | `docker compose exec bot sh -c 'echo $LITELLM_URL'` harus `http://proxy:4000`; cek `docker compose logs proxy`. |
+| Bot pemeriksa tautan diam saja | Chat id belum ada di `ALLOWED_CHATS`, atau `docker compose -f docker-compose.yml -f docker-compose.link.yml logs -f linkbot`. |
+| Bot error 409 Conflict | Dua proses memakai token yang sama. Buat bot kedua di @BotFather, isi `LINKBOT_TOKEN`, lalu jalankan ulang `bash install-link.sh`. |
+| Tautan tidak bisa diperiksa | Situs memblokir bot pratinjau (403/429) atau melarangnya lewat `robots.txt` — itu memang perilaku yang diinginkan. |
 | Perubahan config tidak berlaku | Config di-mount read-only; setelah mengubah file: `docker compose restart proxy`. |
 | Cache terasa "menjawab lama" | Redis menyimpan jawaban identik; tunggu TTL (24 jam) atau `docker compose exec redis redis-cli FLUSHALL` (perhatian: hanya milik Anda sendiri). |
 | Port 4000 tidak bisa diakses dari luar | Memang by design. Pakai SSH tunnel atau `ssh -L`. Jangan publikasikan port tanpa TLS + firewall. |
 
-## 8. Update
+## 9. Update
 
 ```bash
 cd ~/personal-gateway
@@ -187,17 +249,24 @@ git pull --ff-only && bash install.sh
 
 `install.sh` aman dijalankan berulang: ia tidak menimpa `.env` yang sudah ada dan tidak menghapus volume Redis.
 
-## 9. Struktur file
+## 10. Struktur file
 
 ```
 .
 ├── docker-compose.yml        # proxy (LiteLLM) + redis, port hanya 127.0.0.1:4000
 ├── litellm-config.yaml       # alias model, fallback, cooldown, cache Redis
-├── docker-compose.tele.yml   # overlay bot Telegram (opsional)
+├── docker-compose.tele.yml   # overlay bot Telegram AI (opsional)
+├── docker-compose.link.yml   # overlay bot pemeriksa tautan (opsional)
 ├── install.sh                # installer untuk VPS
-├── install-tele.sh           # installer add-on bot
+├── install-tele.sh           # installer add-on bot AI
+├── install-link.sh           # installer add-on bot pemeriksa tautan
 ├── telegram-bot/
 │   ├── bot.py                # bot long-polling, stdlib only
+│   └── Dockerfile            # python:3.12-slim
+├── link-tools/               # bot pemeriksa tautan
+│   ├── linkinspect.py        # inti: pengalihan, oEmbed, Open Graph, anti-SSRF
+│   ├── bot.py                # bot long-polling Telegram
+│   ├── selftest.py           # uji mandiri offline (server HTTP tiruan)
 │   └── Dockerfile            # python:3.12-slim
 ├── .env.example              # contoh konfigurasi (nilai kosong)
 ├── .gitignore                # .env, data/, cache/, *.log, __pycache__
@@ -205,7 +274,7 @@ git pull --ff-only && bash install.sh
 └── README.md
 ```
 
-## 10. Catatan keamanan
+## 11. Catatan keamanan
 
 - Proxy **hanya** bind ke `127.0.0.1:4000`. Jangan ubah ke `0.0.0.0` tanpa reverse proxy + TLS + firewall.
 - Satu `MASTER_KEY` dipakai untuk semua pemakaian; simpan baik-baik dan jangan pernah di-commit.
